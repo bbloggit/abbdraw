@@ -101,9 +101,16 @@
         // Identifiant unique de l'appareil
         const myId = Math.random().toString(36).substring(2, 9);
 
-        // Connexion instantanée à Ably
+        // Connexion à Ably
         const ably = new Ably.Realtime({ key: ABLY_KEY });
-        const channel = ably.channels.get('boubou-draw-sync');
+        
+        // Configuration forcée pour l'historique et le stockage
+        const channel = ably.channels.get('boubou-draw-sync', { 
+            params: { 
+                rewind: '100',
+                persist: 'true' 
+            } 
+        });
 
         // --- 3. CONFIGURATION DES OUTILS ---
         let currentTool = 'pen'; 
@@ -205,4 +212,5 @@
     </script>
 </body>
 </html>
+
 
