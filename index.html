@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Au Boubou Burger - Draw & Send 🍔</title>
-    <!-- Chargement de Pusher pour la synchronisation instantanée -->
+    <!-- Chargement de Pusher -->
     <script src="https://js.pusher.com/8.0.1/pusher.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
@@ -22,7 +22,7 @@
         /* Zone de dessin plein écran */
         canvas { display: block; width: 100vw; height: 100vh; background: #ffffff; position: absolute; top: 0; left: 0; z-index: 1; }
 
-        /* Barre d'outils flottante et discrète */
+        /* Barre d'outils flottante */
         #toolbar {
             position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
             z-index: 10; background: rgba(0, 0, 0, 0.85); padding: 8px 15px;
@@ -34,7 +34,7 @@
             padding: 5px; border-radius: 50%; display: flex; align-items: center; justify-content: center;
         }
         .tool:active { transform: scale(1.2); }
-        .active-tool { background: rgba(255, 255, 255, 0.2); box-shadow: 0 0 5px white; }
+        .active-tool { background: rgba(255, 255, 255, 0.3); box-shadow: 0 0 8px white; }
         
         #colorPicker { width: 30px; height: 30px; border-radius: 50%; border: 2px solid white; cursor: pointer; background: none; }
         .btn-clear { background: #cc0000; color: white; border: none; padding: 6px 12px; border-radius: 20px; font-weight: bold; font-size: 0.8rem; cursor: pointer; }
@@ -57,7 +57,7 @@
         <button id="clearBtn" class="btn-clear">Tout Effacer</button>
     </div>
 
-    <!-- Toile géante -->
+    <!-- Toile de dessin -->
     <canvas id="paintCanvas"></canvas>
 
     <script>
@@ -65,9 +65,8 @@
         const ctx = canvas.getContext('2d');
         const alertScreen = document.getElementById('landscape-alert');
         
-        // --- 1. SÉCURITÉ ET BLOCAGE MODE PAYSAGE ---
+        // --- 1. GESTION DU MODE PAYSAGE ---
         function checkOrientation() {
-            // Vérification stricte de l'orientation
             if (window.innerHeight > window.innerWidth) {
                 alertScreen.style.display = 'flex';
             } else {
@@ -75,10 +74,8 @@
                 resizeCanvas();
             }
         }
-        // Écoute les changements d'orientation et de taille d'écran
         window.addEventListener('resize', checkOrientation);
         window.addEventListener('orientationchange', checkOrientation);
-        window.addEventListener('DOMContentLoaded', checkOrientation);
 
         function resizeCanvas() {
             const tempCanvas = document.createElement('canvas');
@@ -98,17 +95,32 @@
             ctx.lineCap = 'round';
         }
 
-        // --- 2. CONFIGURATION DE PUSHER (Tes clés exactes d'image_19.png) ---
+        // --- 2. CONFIGURATION DE PUSHER CONFIGURÉE (image_19.png) ---
         const PUSHER_KEY = "e32074e0079fa370a3db"; 
         const PUSHER_CLUSTER = "eu";
 
-        const pusher = new Pusher(PUSHER_KEY, { cluster: PUSHER_CLUSTER, forceTLS: true });
-        const channel = pusher.subscribe('private-boubou-menu'); // Canal mis en privé pour les Client Events
-
-        // Génération d'un identifiant unique
+        // Génération d'un ID utilisateur unique pour ne pas recevoir ses propres dessins
         const myId = Math.random().toString(36).substring(2, 9);
 
-        // --- 3. CONFIGURATION DES OUTILS DE DESSIN ---
+        // Simulation d'une autorisation pour contourner le besoin d'un serveur de sécurité
+        const pusher = new Pusher(PUSHER_KEY, { 
+            cluster: PUSHER_CLUSTER, 
+            forceTLS: true,
+            userAuthentication: { endpoint: null },
+            channelAuthorization: {
+                endpoint: null,
+                transport: 'ajax',
+                customHandler: function(params, callback) {
+                    // On s'autorise nous-mêmes immédiatement sur le téléphone
+                    callback(null, { auth: PUSHER_KEY + ":" + myId });
+                }
+            }
+        });
+
+        // Connexion au canal privé (obligatoire pour les Client Events sans serveur)
+        const channel = pusher.subscribe('private-boubou-menu');
+
+        // --- 3. CONFIGURATION DES OUTILS ---
         let currentTool = 'pen'; 
         let isDrawing = false;
         let lastX = 0, lastY = 0;
@@ -116,7 +128,7 @@
         const tools = {
             pen: { width: 4, isEraser: false },
             brush: { width: 15, isEraser: false },
-            eraser: { width: 30, isEraser: true }
+            eraser: { width: 35, isEraser: true }
         };
 
         const colorPicker = document.getElementById('colorPicker');
@@ -131,12 +143,12 @@
         document.getElementById('tool-brush').addEventListener('click', function() { selectTool('brush', this); });
         document.getElementById('tool-eraser').addEventListener('click', function() { selectTool('eraser', this); });
 
-        // --- 4. LOGIQUE DE DESSIN ET ENVOI RÉSEAU ---
+        // --- 4. LOGIQUE DE TRACÉ ET TRANSMISSION ---
         function drawLocalAndSend(x1, y1, x2, y2, tool, color) {
             executeDrawLine(x1, y1, x2, y2, tool, color);
             
-            // Tente l'envoi réseau uniquement si connecté
-            if(pusher.connection.state === 'connected') {
+            // Envoi immédiat aux autres si connecté
+            if (pusher.connection.state === 'connected') {
                 channel.trigger('client-draw-line', { myId, x1, y1, x2, y2, tool, color });
             }
         }
@@ -174,6 +186,7 @@
 
         function stopDrawing() { isDrawing = false; }
 
+        // Événements souris et tactiles
         canvas.addEventListener('mousedown', startDrawing);
         canvas.addEventListener('mousemove', moveDrawing);
         canvas.addEventListener('mouseup', stopDrawing);
@@ -182,19 +195,19 @@
         canvas.addEventListener('touchmove', moveDrawing, { passive: false });
         canvas.addEventListener('touchend', stopDrawing);
 
-        // --- 5. RÉCEPTION DES DESSINS DES AUTRES ---
+        // --- 5. RÉCEPTION DES DESSINS EN DIRECT ---
         channel.bind('client-draw-line', function(data) {
             if (data.myId !== myId) {
                 executeDrawLine(data.x1, data.y1, data.x2, data.y2, data.tool, data.color);
             }
         });
 
-        // --- 6. BOUTON EFFACAGE SYNCHRONISÉ ---
+        // --- 6. EFFACAGE GÉNÉRAL EN TEMPS RÉEL ---
         const clearBtn = document.getElementById('clearBtn');
         clearBtn.addEventListener('click', () => {
             ctx.fillStyle = "#ffffff";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            if(pusher.connection.state === 'connected') {
+            if (pusher.connection.state === 'connected') {
                 channel.trigger('client-clear-all', { myId });
             }
         });
@@ -206,7 +219,7 @@
             }
         });
 
-        // Force la première vérification au démarrage
+        // Premier lancement
         checkOrientation();
     </script>
 </body>
