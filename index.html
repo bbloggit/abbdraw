@@ -4,8 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Au Boubou Burger - Draw & Send 🍔</title>
-    <!-- Chargement de Pusher -->
-    <script src="https://js.pusher.com/8.0.1/pusher.min.js"></script>
+    <!-- Chargement de la bibliothèque Ably -->
+    <script src="https://cdn.ably.com/lib/ably.min-1.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; -webkit-user-select: none; }
         body, html { width: 100%; height: 100%; overflow: hidden; background-color: #ffffff; font-family: sans-serif; }
@@ -95,30 +95,15 @@
             ctx.lineCap = 'round';
         }
 
-        // --- 2. CONFIGURATION DE PUSHER CONFIGURÉE (image_19.png) ---
-        const PUSHER_KEY = "e32074e0079fa370a3db"; 
-        const PUSHER_CLUSTER = "eu";
+        // --- 2. CONFIGURATION DE ABLY ---
+        const ABLY_KEY = "itUP8Q.ykLVMw:TaF2vQ4LRmV8hbGLnRd_R3TAYFbTgviJkzhtyVUMYWU"; 
 
-        // Génération d'un ID utilisateur unique pour ne pas recevoir ses propres dessins
+        // Identifiant unique de l'appareil
         const myId = Math.random().toString(36).substring(2, 9);
 
-        // Simulation d'une autorisation pour contourner le besoin d'un serveur de sécurité
-        const pusher = new Pusher(PUSHER_KEY, { 
-            cluster: PUSHER_CLUSTER, 
-            forceTLS: true,
-            userAuthentication: { endpoint: null },
-            channelAuthorization: {
-                endpoint: null,
-                transport: 'ajax',
-                customHandler: function(params, callback) {
-                    // On s'autorise nous-mêmes immédiatement sur le téléphone
-                    callback(null, { auth: PUSHER_KEY + ":" + myId });
-                }
-            }
-        });
-
-        // Connexion au canal privé (obligatoire pour les Client Events sans serveur)
-        const channel = pusher.subscribe('private-boubou-menu');
+        // Connexion instantanée à Ably
+        const ably = new Ably.Realtime({ key: ABLY_KEY });
+        const channel = ably.channels.get('boubou-draw-sync');
 
         // --- 3. CONFIGURATION DES OUTILS ---
         let currentTool = 'pen'; 
@@ -147,10 +132,8 @@
         function drawLocalAndSend(x1, y1, x2, y2, tool, color) {
             executeDrawLine(x1, y1, x2, y2, tool, color);
             
-            // Envoi immédiat aux autres si connecté
-            if (pusher.connection.state === 'connected') {
-                channel.trigger('client-draw-line', { myId, x1, y1, x2, y2, tool, color });
-            }
+            // Envoi à Ably
+            channel.publish('draw', { myId, x1, y1, x2, y2, tool, color });
         }
 
         function executeDrawLine(x1, y1, x2, y2, tool, color) {
@@ -186,7 +169,6 @@
 
         function stopDrawing() { isDrawing = false; }
 
-        // Événements souris et tactiles
         canvas.addEventListener('mousedown', startDrawing);
         canvas.addEventListener('mousemove', moveDrawing);
         canvas.addEventListener('mouseup', stopDrawing);
@@ -196,7 +178,8 @@
         canvas.addEventListener('touchend', stopDrawing);
 
         // --- 5. RÉCEPTION DES DESSINS EN DIRECT ---
-        channel.bind('client-draw-line', function(data) {
+        channel.subscribe('draw', function(message) {
+            const data = message.data;
             if (data.myId !== myId) {
                 executeDrawLine(data.x1, data.y1, data.x2, data.y2, data.tool, data.color);
             }
@@ -207,13 +190,11 @@
         clearBtn.addEventListener('click', () => {
             ctx.fillStyle = "#ffffff";
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            if (pusher.connection.state === 'connected') {
-                channel.trigger('client-clear-all', { myId });
-            }
+            channel.publish('clear', { myId });
         });
 
-        channel.bind('client-clear-all', function(data) {
-            if (data.myId !== myId) {
+        channel.subscribe('clear', function(message) {
+            if (message.data.myId !== myId) {
                 ctx.fillStyle = "#ffffff";
                 ctx.fillRect(0, 0, canvas.width, canvas.height);
             }
@@ -224,3 +205,4 @@
     </script>
 </body>
 </html>
+
